@@ -6,12 +6,11 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   backend-tests:
     name: Back-end tests
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
 
     steps:
@@ -41,6 +40,8 @@ jobs:
 
   frontend-tests:
     name: Front-end tests
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
 
     steps:
@@ -67,7 +68,7 @@ jobs:
       - name: Lancer tests Angular + couverture
         # Le launcher ChromeHeadlessCI sera ajouté dans karma.conf.js
         working-directory: front
-        run: npx ng test --watch=false --code-coverage --browsers=ChromeHeadless
+        run: npx ng test --watch=false --code-coverage --browsers=ChromeHeadlessCI
 
       - name: Publier les rapports front (coverage)
         if: always()
