@@ -29,6 +29,7 @@ module.exports = function (config) {
       subdir: '.',
       reporters: [
         { type: 'html' },
+        { type: 'lcovonly', subdir: '.', file: 'lcov.info' }, // pour Sonar
         { type: 'text-summary' }
       ]
     },
