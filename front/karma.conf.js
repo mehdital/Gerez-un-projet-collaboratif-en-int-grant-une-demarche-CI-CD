@@ -1,6 +1,6 @@
 // Karma configuration file, see link for more information
 // https://karma-runner.github.io/1.0/config/configuration-file.html
-
+const path = require("node:path");
 module.exports = function (config) {
   config.set({
     customLaunchers: {
@@ -31,7 +31,7 @@ module.exports = function (config) {
       suppressAll: true, // removes the duplicated traces
     },
     coverageReporter: {
-      dir: require("path").join(__dirname, "./coverage/bobapp"),
+      dir: path.join(__dirname, "./coverage/bobapp"),
       subdir: ".",
       reporters: [
         { type: "html" },
