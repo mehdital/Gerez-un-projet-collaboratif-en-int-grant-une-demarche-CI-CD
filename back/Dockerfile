@@ -6,5 +6,7 @@ COPY src /workspace/src
 RUN mvn -B -f pom.xml clean package -DskipTests
 FROM eclipse-temurin:11-jre
 COPY --from=build /workspace/target/*.jar app.jar
+RUN useradd -r -u 10001 appuser && chown appuser:appuser /app/app.jar
+USER appuser
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar","app.jar"]
