@@ -5,8 +5,9 @@ COPY pom.xml /workspace
 COPY src /workspace/src
 RUN mvn -B -f pom.xml clean package -DskipTests
 FROM eclipse-temurin:11-jre
-COPY --from=build /workspace/target/*.jar app.jar
-RUN useradd -r -u 10001 appuser && chown appuser:appuser /app/app.jar
+WORKDIR /app
+COPY --from=build /workspace/target/*.jar /app/app.jar
+RUN useradd -u 10001 appuser && chown appuser:appuser /app/app.jar
 USER appuser
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar","app.jar"]
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
