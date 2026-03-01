@@ -1,0 +1,227 @@
+name: CI/CD
+
+on:
+  # Déclenchement après merge ou push sur la branche main
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+# Évite d'avoir 2 pipelines concurrentes sur la même branche
+concurrency:
+  group: bobapp-cicd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (back + front)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Tests back + JaCoCo
+        working-directory: back
+        run: mvn -B clean verify
+
+      - name: Setup Nodejs
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '16'
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - name: Installer Chrome
+        uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce
+
+      - name: Exporter CHROME_BIN
+        run: echo "CHROME_BIN=$(which chrome || which google-chrome || which chromium-browser)" >> $GITHUB_ENV
+
+      - name: Installer dépendances front
+        working-directory: front
+        run: npm ci
+
+      - name: Tests front + coverage
+        working-directory: front
+        run: npx ng test --watch=false --code-coverage --browsers=ChromeHeadlessCI
+
+      - name: Publier rapports de couverture
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: coverage-reports
+          path: |
+            back/target/site/jacoco/**
+            front/coverage/**
+          if-no-files-found: warn
+
+  quality:
+    name: Quality (SonarQube Cloud)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    needs: tests
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Setup Nodejs
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '16'
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - name: Installer Chrome
+        uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce
+
+      - name: Exporter CHROME_BIN
+        run: echo "CHROME_BIN=$(which chrome || which google-chrome || which chromium-browser)" >> $GITHUB_ENV
+
+      - name: Générer couverture back (JaCoCo)
+        working-directory: back
+        run: mvn -B clean verify
+
+      - name: Installer dépendances front
+        working-directory: front
+        run: npm ci
+
+      - name: Générer couverture front
+        working-directory: front
+        run: npx ng test --watch=false --code-coverage --browsers=ChromeHeadlessCI
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: SonarQube Quality Gate check
+        # Bloque si le quality gate fail
+        uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
+        with:
+          pollingTimeoutSec: 600
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  build:
+    name: Build (back + front)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    needs: quality
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Build back-end (sans retests)
+        working-directory: back
+        run: mvn -B -DskipTests package
+
+      - name: Setup Nodejs
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '16'
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - name: Installer dépendances front
+        working-directory: front
+        run: npm ci
+
+      - name: Build front-end
+        working-directory: front
+        run: npm run build --if-present
+
+      - name: Publier artefacts de build
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: build-artifacts
+          path: |
+            back/target/*.jar
+            front/dist/**
+          if-no-files-found: warn
+
+  docker:
+    name: Docker build & push (Docker Hub)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    needs: build
+
+    # push Docker uniquement depuis main
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main')
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Connexion à Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Métadonnées image back (tags)
+        id: meta-back
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/bobapp-back
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build & push image back
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: ./back
+          file: ./back/Dockerfile
+          push: true
+          tags: ${{ steps.meta-back.outputs.tags }}
+          labels: ${{ steps.meta-back.outputs.labels }}
+
+      - name: Métadonnées image front (tags)
+        id: meta-front
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/bobapp-front
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build & push image front
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: ./front
+          file: ./front/Dockerfile
+          push: true
+          tags: ${{ steps.meta-front.outputs.tags }}
+          labels: ${{ steps.meta-front.outputs.labels }}

@@ -1,0 +1,68 @@
+name: Quality (SonarQube Cloud)
+
+on:
+  # Analyse qualité des PR
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  sonar:
+    name: Sonar scan + Quality Gate
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Setup Nodejs
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '16'
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - name: Installer Chrome
+        uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce
+
+      - name: Exporter CHROME_BIN
+        run: echo "CHROME_BIN=$(which chrome || which google-chrome || which chromium-browser)" >> $GITHUB_ENV
+
+      - name: Générer couverture back (JaCoCo)
+        working-directory: back
+        run: mvn -B clean verify
+
+      - name: Installer dépendances front
+        working-directory: front
+        run: npm ci
+
+      - name: Générer couverture front
+        working-directory: front
+        run: npx ng test --watch=false --code-coverage --browsers=ChromeHeadlessCI
+
+      - name: SonarQube Scan
+        # Lit automatiquement sonar-project.properties à la racine
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: SonarQube Quality Gate check
+        # arrete le job si le quality gate est FAIL
+        uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
+        with:
+          pollingTimeoutSec: 600
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
