@@ -1,7 +1,7 @@
 name: CI/CD
 
 on:
-  # Déclenchement après merge ou push sur la branche principale
+  # Déclenchement après merge ou push sur la branche main
   push:
     branches: [ main ]
   workflow_dispatch:
